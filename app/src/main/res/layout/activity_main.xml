@@ -10,7 +10,7 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:paddingBottom="10dp"
-        android:text="גרסה: 1.0.16"
+        android:text="גרסה: 1.0.17"
         android:textColor="#888888"
         android:textSize="12sp" />
 
