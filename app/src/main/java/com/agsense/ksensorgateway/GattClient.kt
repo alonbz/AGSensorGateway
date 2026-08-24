@@ -200,7 +200,10 @@ class GattClient(private val context: Context, private val listener: Listener) {
 
     private fun sendCfgTrigger() {
         listener.onStatus("מגדיר דיווח בזמן אמת...")
-        val json = """{"msg":"cfg","trObj":[{"trIdx":4,"trType":12,"trAct":16}]}"""
+        // Trying the flat/legacy schema (K6 supplement doc) instead of the
+        // trObj-array schema (KBPro spec) — the device rejected the latter
+        // with cause 0x103 ("input content field is illegal").
+        val json = """{"msg":"cfg","stype":64,"trType":8,"trAct":16,"htMsk":16}"""
         sendJsonChunks(json.toByteArray(Charsets.US_ASCII))
     }
 
