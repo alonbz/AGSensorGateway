@@ -5,8 +5,10 @@ import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothManager
 import android.bluetooth.le.BluetoothLeScanner
 import android.bluetooth.le.ScanCallback
+import android.bluetooth.le.ScanFilter
 import android.bluetooth.le.ScanResult
 import android.bluetooth.le.ScanSettings
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -21,6 +23,7 @@ import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -51,6 +54,7 @@ class MainActivity : AppCompatActivity() {
 
         private const val REQUEST_PERMISSIONS_CODE = 100
         private const val REQUEST_PERMISSIONS_CODE_EXPLORER = 101
+        private const val REQUEST_PERMISSIONS_CODE_CAMERA = 102
 
         // How often to open a fresh GATT connection to re-read a K7800P's
         // battery (see maybeRefreshK7800pBattery) — battery drains slowly,
@@ -61,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         // Shown via the "גרסה" options-menu item — previously a fixed
         // TextView on the main screen (removed to make room for the
         // sensor list / search box); bump this on every build.
-        private const val APP_VERSION = "1.0.42"
+        private const val APP_VERSION = "1.0.43"
     }
 
     private lateinit var statusText: TextView
@@ -79,6 +83,26 @@ class MainActivity : AppCompatActivity() {
     private var scrollLog: android.widget.ScrollView? = null
 
     private lateinit var filterEditText: EditText
+
+    // Set only while the current scan is BLE-hardware-filtered to one MAC
+    // (see startScanning(targetMac)) — null means the normal, unfiltered
+    // "see everyone nearby" scan. Used so clearing the search box also
+    // knows to restart an unfiltered scan, instead of silently staying
+    // stuck seeing only the one focused sensor.
+    private var focusedScanMac: String? = null
+
+    // Carries a barcode-scanned MAC across the Bluetooth-permission
+    // request flow (onRequestPermissionsResult doesn't get a "which MAC"
+    // parameter of its own) — set by handleScannedMac() right before
+    // requesting permission, consumed and cleared once granted.
+    private var pendingFocusedScanMac: String? = null
+
+    private val barcodeScanLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val raw = result.data?.getStringExtra(BarcodeScanActivity.EXTRA_RESULT)
+            if (raw != null) handleScannedMac(raw)
+        }
+    }
 
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
@@ -137,7 +161,30 @@ class MainActivity : AppCompatActivity() {
             }
             override fun afterTextChanged(s: android.text.Editable?) {}
         })
-        clearFilterButton.setOnClickListener { filterEditText.setText("") }
+        clearFilterButton.setOnClickListener {
+            filterEditText.setText("")
+            // If we're mid a MAC-focused scan (from a barcode scan), typing
+            // an empty filter alone wouldn't bring other sensors back —
+            // the BLE-level ScanFilter is still restricting the radio to
+            // just that one MAC. Restart unfiltered so "נקה" really means
+            // "show everyone" again.
+            if (focusedScanMac != null) {
+                focusedScanMac = null
+                if (isScanning) {
+                    stopScanningInternal()
+                    startScanning(null)
+                }
+            }
+        }
+
+        val buttonScanBarcode: Button = findViewById(R.id.buttonScanBarcode)
+        buttonScanBarcode.setOnClickListener {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+                barcodeScanLauncher.launch(Intent(this, BarcodeScanActivity::class.java))
+            } else {
+                ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.CAMERA), REQUEST_PERMISSIONS_CODE_CAMERA)
+            }
+        }
 
         val bluetoothManager = getSystemService(BluetoothManager::class.java)
         val bluetoothAdapter: BluetoothAdapter? = bluetoothManager?.adapter
@@ -347,12 +394,34 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
         }
 
-    private fun ensurePermissionsThenScan() {
+    private fun ensurePermissionsThenScan(targetMac: String? = null) {
         if (hasAllPermissions()) {
-            startScanning()
+            startScanning(targetMac)
         } else {
+            pendingFocusedScanMac = targetMac
             ActivityCompat.requestPermissions(this, requiredPermissions(), REQUEST_PERMISSIONS_CODE)
         }
+    }
+
+    /**
+     * Validates a raw barcode/QR scan result as a MAC address, and if it
+     * is one, focuses the list on it and starts (or restarts) a scan
+     * filtered — at the BLE hardware level, not just on-screen — to just
+     * that one address. This is the whole point of scanning the barcode
+     * in the first place: skip the noisy full scan of everything nearby.
+     */
+    private fun handleScannedMac(raw: String) {
+        val hexOnly = raw.uppercase().filter { it in '0'..'9' || it in 'A'..'F' }
+        if (!hexOnly.matches(Regex("^[0-9A-F]{12}$"))) {
+            Toast.makeText(this, "הבר-קוד שנסרק לא מכיל MAC תקין: '$raw'", Toast.LENGTH_LONG).show()
+            return
+        }
+        val mac = hexOnly.chunked(2).joinToString(":")
+        filterEditText.setText(mac)
+        filterEditText.setSelection(filterEditText.text.length)
+        Toast.makeText(this, "מתמקד בחיישן $mac", Toast.LENGTH_SHORT).show()
+        if (isScanning) stopScanningInternal()
+        ensurePermissionsThenScan(mac)
     }
 
     override fun onRequestPermissionsResult(
@@ -363,9 +432,17 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
         if (requestCode == REQUEST_PERMISSIONS_CODE) {
             if (grantResults.isNotEmpty() && grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                startScanning()
+                val mac = pendingFocusedScanMac
+                pendingFocusedScanMac = null
+                startScanning(mac)
             } else {
                 Toast.makeText(this, "צריך לאשר הרשאות Bluetooth כדי לסרוק חיישנים", Toast.LENGTH_LONG).show()
+            }
+        } else if (requestCode == REQUEST_PERMISSIONS_CODE_CAMERA) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                barcodeScanLauncher.launch(Intent(this, BarcodeScanActivity::class.java))
+            } else {
+                Toast.makeText(this, "צריך לאשר הרשאת מצלמה כדי לסרוק בר-קוד", Toast.LENGTH_LONG).show()
             }
         } else if (requestCode == REQUEST_PERMISSIONS_CODE_EXPLORER) {
             val mac = explorerPendingMac
@@ -396,7 +473,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun startScanning() {
+    private fun startScanning(targetMac: String? = null) {
         val scanner = bluetoothLeScanner
         if (scanner == null) {
             Toast.makeText(this, "בלוטות' לא זמין/כבוי במכשיר", Toast.LENGTH_LONG).show()
@@ -436,7 +513,7 @@ class MainActivity : AppCompatActivity() {
 
         val settings = settingsBuilder.build()
 
-        // DIAGNOSTIC MODE: scanning with NO filters (was: filtered by the
+        // DIAGNOSTIC MODE: no filter by default (was: filtered by the
         // Eddystone service UUID 0xFEAA). The KSensorParser's Eddystone
         // assumption was never confirmed against real hardware, and real
         // KBPro devices appear to advertise using a different format
@@ -446,14 +523,28 @@ class MainActivity : AppCompatActivity() {
         // shows us the real advertisement layout, put a proper filter
         // back here (by name prefix "KBPro"/"KSensor" or the correct
         // UUID) to restore the battery savings.
-        val filters = emptyList<android.bluetooth.le.ScanFilter>()
+        //
+        // EXCEPT when targetMac is set (barcode-scan flow): then we DO
+        // filter, by exact device address, at the BLE hardware level —
+        // the whole point of scanning a barcode is to skip the noisy
+        // unfiltered scan and go straight to just that one sensor.
+        val filters = if (targetMac != null) {
+            listOf(ScanFilter.Builder().setDeviceAddress(targetMac).build())
+        } else {
+            emptyList()
+        }
+        focusedScanMac = targetMac
 
         try {
             scanner.startScan(filters, settings, scanCallback)
             isScanning = true
-            statusText.text = "סורק..."
+            statusText.text = if (targetMac != null) "סורק (ממוקד ל-$targetMac)..." else "סורק..."
             invalidateOptionsMenu()
-            appendLog("--- סריקה התחילה (ללא פילטר, מצב דיאגנוסטיקה) ---")
+            if (targetMac != null) {
+                appendLog("--- סריקה ממוקדת התחילה (רק $targetMac, בעקבות סריקת בר-קוד) ---")
+            } else {
+                appendLog("--- סריקה התחילה (ללא פילטר, מצב דיאגנוסטיקה) ---")
+            }
         } catch (e: SecurityException) {
             Log.e(TAG, "Missing permission to start scan", e)
         }
