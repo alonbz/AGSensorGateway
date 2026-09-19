@@ -65,7 +65,7 @@ class MainActivity : AppCompatActivity() {
         // Shown via the "גרסה" options-menu item — previously a fixed
         // TextView on the main screen (removed to make room for the
         // sensor list / search box); bump this on every build.
-        private const val APP_VERSION = "1.0.43"
+        private const val APP_VERSION = "1.0.44"
     }
 
     private lateinit var statusText: TextView
@@ -411,7 +411,22 @@ class MainActivity : AppCompatActivity() {
      * in the first place: skip the noisy full scan of everything nearby.
      */
     private fun handleScannedMac(raw: String) {
-        val hexOnly = raw.uppercase().filter { it in '0'..'9' || it in 'A'..'F' }
+        val upper = raw.uppercase()
+
+        // Real-world barcode payloads seen on these sensors aren't a bare
+        // MAC — they're a structured string like "MAC:BC5729007D2B,SERIAL:2..."
+        // with other comma-separated fields alongside it. Stripping every
+        // non-hex character from the WHOLE string (the old approach) also
+        // picks up stray hex-looking letters from those other fields (e.g.
+        // the "A" and "C" in "MAC", the "E" and "A" in "SERIAL"), so it
+        // never lands on exactly 12 characters. Look specifically for a
+        // "MAC:" label and take the 12 hex characters right after it.
+        val labeled = Regex("MAC:([0-9A-F]{12})").find(upper)?.groupValues?.get(1)
+
+        // Fallback for barcodes that really are just the bare MAC with no
+        // label/other fields at all.
+        val hexOnly = labeled ?: upper.filter { it in '0'..'9' || it in 'A'..'F' }
+
         if (!hexOnly.matches(Regex("^[0-9A-F]{12}$"))) {
             Toast.makeText(this, "הבר-קוד שנסרק לא מכיל MAC תקין: '$raw'", Toast.LENGTH_LONG).show()
             return
