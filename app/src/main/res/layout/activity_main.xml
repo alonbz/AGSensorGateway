@@ -41,6 +41,18 @@
             android:text="נקה" />
     </LinearLayout>
 
+    <!-- Scans a barcode/QR off the physical sensor's label to get its MAC,
+         then starts a scan filtered (at the BLE hardware level, via
+         ScanFilter) to just that one address — instead of the usual
+         unfiltered scan that reports every BLE device nearby. See
+         MainActivity.handleScannedMac() / BarcodeScanActivity. -->
+    <Button
+        android:id="@+id/buttonScanBarcode"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="8dp"
+        android:text="📷 סרוק בר-קוד של חיישן" />
+
     <!-- Hidden by default so the sensor list below gets the screen's
          full height for everyday use. Toggled open on demand from the
          "הצג פרטים טכניים" item in the options menu (see MainActivity)
