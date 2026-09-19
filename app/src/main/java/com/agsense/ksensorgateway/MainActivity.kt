@@ -61,7 +61,7 @@ class MainActivity : AppCompatActivity() {
         // Shown via the "גרסה" options-menu item — previously a fixed
         // TextView on the main screen (removed to make room for the
         // sensor list / search box); bump this on every build.
-        private const val APP_VERSION = "1.0.41"
+        private const val APP_VERSION = "1.0.42"
     }
 
     private lateinit var statusText: TextView
@@ -614,7 +614,8 @@ class MainActivity : AppCompatActivity() {
                 appendLog(
                     "[KSensor] ${result.device.address}  temp=${parsed.temperatureC}  " +
                         "hum=${parsed.humidityPct}  batt=${parsed.batteryRaw}  " +
-                        "batt%=$batteryPercent  acc=(${parsed.accX},${parsed.accY},${parsed.accZ})"
+                        "batt%=$batteryPercent  acc=(${parsed.accX},${parsed.accY},${parsed.accZ})" +
+                        "  alarm=${parsed.alarm}"
                 )
 
                 val reading = SensorReading(
@@ -628,6 +629,7 @@ class MainActivity : AppCompatActivity() {
                     accXmg = parsed.accX,
                     accYmg = parsed.accY,
                     accZmg = parsed.accZ,
+                    alarmCode = parsed.alarm,
                     lastUpdateMillis = System.currentTimeMillis()
                 )
                 runOnUiThread { adapter.upsert(reading) }

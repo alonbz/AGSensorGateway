@@ -60,6 +60,10 @@ class SensorAdapter(private val onItemClick: (SensorReading) -> Unit = {}) :
         val PDI = "\u2069"
         item.doorOpen?.let { parts.add("$LRI🚪 ${if (it) "פתוחה" else "סגורה"}$PDI") }
         item.lightDetected?.let { parts.add("$LRI${if (it) "💡 אור" else "🌑 חושך"}$PDI") }
+        // Raw KSensor alarm/cutoff byte (KSensorParser's MASK_ALARM) — shown
+        // as-is; we don't yet know what each code (observed range 0-4)
+        // means, so no severity styling or filtering is applied here.
+        item.alarmCode?.let { parts.add("$LRI⚠️ קוד התראה: $it$PDI") }
         // Only shown once all three axes are present — a beacon lying flat
         // reads roughly X≈0, Y≈0, Z≈1000mg (section 2 of the K6 supplement).
         if (item.accXmg != null && item.accYmg != null && item.accZmg != null) {
